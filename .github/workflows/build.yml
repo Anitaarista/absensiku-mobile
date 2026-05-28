@@ -103,14 +103,25 @@ jobs:
             --platform android \
             --profile ${{ github.event.inputs.build_profile || 'preview' }} \
             --non-interactive \
-            --wait \
-            --output ./build-output/
+            --wait
+
+      - name: Download APK
+        if: success()
+        run: |
+          mkdir -p artifacts
+          BUILD_ID=$(eas build:list --platform android --limit 1 --json 2>/dev/null | jq -r '.[0].id // empty')
+          if [ -n "$BUILD_ID" ]; then
+            eas build:download --id "$BUILD_ID" --output-dir ./artifacts/ || echo "Download failed, build may still be available on Expo"
+          else
+            echo "Could not determine build ID, check Expo dashboard for download"
+          fi
 
       - name: Upload APK Artifact
+        if: success()
         uses: actions/upload-artifact@v4
         with:
           name: absensiku-android-${{ github.event.inputs.build_profile || 'preview' }}
-          path: ./build-output/*.apk
+          path: ./artifacts/*.apk
           retention-days: 30
           if-no-files-found: warn
 
@@ -146,14 +157,23 @@ jobs:
             --platform ios \
             --profile ${{ github.event.inputs.build_profile || 'preview' }} \
             --non-interactive \
-            --wait \
-            --output ./build-output/
+            --wait
+
+      - name: Download IPA
+        if: success()
+        run: |
+          mkdir -p artifacts
+          BUILD_ID=$(eas build:list --platform ios --limit 1 --json 2>/dev/null | jq -r '.[0].id // empty')
+          if [ -n "$BUILD_ID" ]; then
+            eas build:download --id "$BUILD_ID" --output-dir ./artifacts/ || echo "Download failed"
+          fi
 
       - name: Upload IPA Artifact
+        if: success()
         uses: actions/upload-artifact@v4
         with:
           name: absensiku-ios-${{ github.event.inputs.build_profile || 'preview' }}
-          path: ./build-output/*.ipa
+          path: ./artifacts/*.ipa
           retention-days: 30
           if-no-files-found: warn
 
