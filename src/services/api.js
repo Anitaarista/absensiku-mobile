@@ -1,13 +1,27 @@
 import axios from 'axios';
+import Constants from 'expo-constants';
 
 // Base URL - configurable for different environments
+// Priority: EXPO_PUBLIC_API_URL env > expo-constants extra.apiUrl > default
 // Android emulator uses 10.0.2.2 for localhost
 // iOS simulator uses localhost
-// Physical device uses actual IP
-const BASE_URL = 'http://10.0.2.2:3000/api';
+// Physical device uses actual IP or production URL
+const getBaseUrl = () => {
+  // EAS Build env variable (EXPO_PUBLIC_* are embedded at build time)
+  if (process.env.EXPO_PUBLIC_API_URL) {
+    return process.env.EXPO_PUBLIC_API_URL;
+  }
+  // expo-constants from app.json extra field
+  const extraUrl = Constants.expoConfig?.extra?.apiUrl;
+  if (extraUrl && extraUrl !== 'http://localhost:3000/api') {
+    return extraUrl;
+  }
+  // Default: Android emulator localhost
+  return 'http://10.0.2.2:3000/api';
+};
 
 const api = axios.create({
-  baseURL: BASE_URL,
+  baseURL: getBaseUrl(),
   timeout: 15000,
   headers: {
     'Content-Type': 'application/json',

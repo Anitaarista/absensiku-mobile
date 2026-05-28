@@ -1,5 +1,6 @@
 # Dependencies
 node_modules/
+package-lock.json
 
 # Expo
 .expo/
@@ -7,46 +8,15 @@ dist/
 web-build/
 
 # Native
-*.orig.*
 *.jks
 *.p8
 *.p12
 *.key
 *.mobileprovision
+*.orig.*
 
-# Metro
-.metro-health-check*
-
-# Debug
-npm-debug.*
-yarn-debug.*
-yarn-error.*
-
-# macOS
-.DS_Store
-*.pbxuser
-*.mode1v3
-*.mode2v3
-*.perspectivev3
-*.xcuserstate
-project.xcworkspace/
-xcuserdata/
-
-# Local env files
-.env
-.env.local
-.env.development.local
-.env.test.local
-.env.production.local
-
-# Firebase credentials (NEVER commit these)
-*-firebase-adminsdk-*.json
-google-services.json
-GoogleService-Info.plist
-
-# Build artifacts
-artifacts/
-build/
+# EAS
+.eas/
 
 # IDE
 .idea/
@@ -54,6 +24,27 @@ build/
 *.swp
 *.swo
 
-# Backend data
-backend/data/
-backend/config/firebase-credential.json
+# OS
+.DS_Store
+Thumbs.db
+
+# Environment
+.env
+.env.local
+.env.production
+
+# Firebase credentials (NEVER commit)
+*firebase-adminsdk*.json
+*service-account*.json
+google-services.json
+GoogleService-Info.plist
+
+# Build artifacts
+*.apk
+*.aab
+*.ipa
+build/
+
+# Logs
+*.log
+npm-debug.log*

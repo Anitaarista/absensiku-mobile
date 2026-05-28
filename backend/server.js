@@ -9,35 +9,52 @@ const admin = require('firebase-admin');
 // Firebase Initialization
 // Supports: FIREBASE_CREDENTIAL env var (JSON string), local file, or project ID fallback
 // ========================================
+const FIREBASE_PROJECT_ID = process.env.FIREBASE_PROJECT_ID || 'gen-lang-client-0173847591';
+const FIREBASE_DATABASE_URL = process.env.FIREBASE_DATABASE_URL || `https://${FIREBASE_PROJECT_ID}.firebaseio.com`;
+
 if (admin.apps.length === 0) {
   try {
-    // Method 1: Try FIREBASE_CREDENTIAL environment variable (JSON string)
+    // Method 1: Try FIREBASE_CREDENTIAL environment variable (base64 encoded JSON)
     if (process.env.FIREBASE_CREDENTIAL) {
-      const serviceAccount = JSON.parse(process.env.FIREBASE_CREDENTIAL);
+      let serviceAccount;
+      try {
+        // Try base64 decode first (for GitHub Actions secrets)
+        serviceAccount = JSON.parse(Buffer.from(process.env.FIREBASE_CREDENTIAL, 'base64').toString('utf8'));
+      } catch {
+        // Fallback to plain JSON string
+        serviceAccount = JSON.parse(process.env.FIREBASE_CREDENTIAL);
+      }
       admin.initializeApp({
         credential: admin.credential.cert(serviceAccount),
-        databaseURL: process.env.FIREBASE_DATABASE_URL || 'https://gen-lang-client-0173847591.firebaseio.com'
+        databaseURL: FIREBASE_DATABASE_URL,
       });
       console.log('✅ Firebase initialized with FIREBASE_CREDENTIAL env var');
-    } else {
-      // Method 2: Try local credential file
-      const serviceAccount = require('/home/z/my-project/upload/gen-lang-client-0173847591-firebase-adminsdk-fbsvc-0c9f6c5c70.json');
+    } else if (process.env.GOOGLE_APPLICATION_CREDENTIALS) {
+      // Method 2: Use GOOGLE_APPLICATION_CREDENTIALS env var (file path)
+      const serviceAccount = require(process.env.GOOGLE_APPLICATION_CREDENTIALS);
       admin.initializeApp({
         credential: admin.credential.cert(serviceAccount),
-        databaseURL: 'https://gen-lang-client-0173847591.firebaseio.com'
+        databaseURL: FIREBASE_DATABASE_URL,
       });
-      console.log('✅ Firebase initialized with service account file');
+      console.log('✅ Firebase initialized with GOOGLE_APPLICATION_CREDENTIALS file');
+    } else {
+      // Method 3: Fallback to project ID (limited access - Firestore only, no auth)
+      admin.initializeApp({
+        projectId: FIREBASE_PROJECT_ID,
+        databaseURL: FIREBASE_DATABASE_URL,
+      });
+      console.log('✅ Firebase initialized with project ID fallback (limited access)');
     }
   } catch (e) {
-    console.log('⚠️ Firebase credential not found via env/file, using project ID fallback');
+    console.log('❌ Firebase initialization failed:', e.message);
     try {
       admin.initializeApp({
-        projectId: process.env.FIREBASE_PROJECT_ID || 'gen-lang-client-0173847591',
-        databaseURL: process.env.FIREBASE_DATABASE_URL || 'https://gen-lang-client-0173847591.firebaseio.com'
+        projectId: FIREBASE_PROJECT_ID,
+        databaseURL: FIREBASE_DATABASE_URL,
       });
-      console.log('✅ Firebase initialized with project ID (limited access)');
+      console.log('✅ Firebase initialized with project ID fallback (limited access)');
     } catch (initErr) {
-      console.log('❌ Firebase initialization failed:', initErr.message);
+      console.log('❌ Firebase initialization completely failed:', initErr.message);
     }
   }
 }

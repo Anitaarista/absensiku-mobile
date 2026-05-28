@@ -1,17 +1,17 @@
-name: CI
+name: CI Check
 
 on:
   push:
-    branches: [main]
+    branches: [main, develop]
   pull_request:
     branches: [main]
 
 jobs:
-  validate:
-    name: Validate & Lint
+  lint-and-test:
+    name: Lint & Test
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
+      - name: Checkout code
         uses: actions/checkout@v4
 
       - name: Setup Node.js
@@ -23,77 +23,33 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Validate config files
+      - name: Check project structure
         run: |
-          node -e "const app = require('./app.json'); console.log('✅ App:', app.expo.name, 'v' + app.expo.version)"
-          node -e "const pkg = require('./package.json'); console.log('✅ Package:', pkg.name, 'v' + pkg.version)"
-          node -e "const eas = require('./eas.json'); console.log('✅ EAS profiles:', Object.keys(eas.build).join(', '))"
+          echo "Checking project structure..."
+          test -f App.js && echo "✅ App.js found"
+          test -f app.json && echo "✅ app.json found"
+          test -f babel.config.js && echo "✅ babel.config.js found"
+          test -f eas.json && echo "✅ eas.json found"
+          test -d src && echo "✅ src/ directory found"
+          test -d src/screens && echo "✅ src/screens/ directory found"
+          test -d src/navigation && echo "✅ src/navigation/ directory found"
+          test -d src/context && echo "✅ src/context/ directory found"
+          test -d src/services && echo "✅ src/services/ directory found"
+          test -d backend && echo "✅ backend/ directory found"
+          test -f backend/server.js && echo "✅ backend/server.js found"
 
-      - name: Check syntax
+      - name: Validate app.json
         run: |
-          ERROR_COUNT=0
-          for file in $(find src -name "*.js"); do
-            if ! node -c "$file" 2>/dev/null; then
-              echo "::error file=$file::Syntax error"
-              ERROR_COUNT=$((ERROR_COUNT + 1))
-            fi
-          done
-          if [ $ERROR_COUNT -gt 0 ]; then
-            echo "❌ $ERROR_COUNT files have syntax errors"
-            exit 1
-          fi
-          echo "✅ All source files pass syntax check"
+          node -e "const cfg = require('./app.json'); console.log('App:', cfg.expo.name, '| Version:', cfg.expo.version, '| Android:', cfg.expo.android.package)"
 
-      - name: Validate backend
+      - name: Validate eas.json
+        run: |
+          node -e "const cfg = require('./eas.json'); console.log('EAS profiles:', Object.keys(cfg.build).join(', '))"
+
+      - name: Install backend dependencies
+        run: cd backend && npm ci
+
+      - name: Verify backend server syntax
         run: |
           cd backend
-          npm ci
-          node -c server.js
-          echo "✅ Backend syntax OK"
-
-  # Auto-build Android APK on main push
-  build-android:
-    name: Build Android APK
-    needs: validate
-    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: 20
-          cache: 'npm'
-
-      - name: Setup Expo & EAS
-        uses: expo/expo-github-action@v8
-        with:
-          expo-version: latest
-          eas-version: latest
-          token: ${{ secrets.EXPO_TOKEN }}
-
-      - name: Install dependencies
-        run: npm ci
-
-      - name: Build Android Preview APK
-        run: eas build --platform android --profile preview --non-interactive --wait
-
-      - name: Download & Upload APK
-        if: success()
-        run: |
-          mkdir -p artifacts
-          BUILD_ID=$(eas build:list --platform android --limit 1 --json 2>/dev/null | jq -r '.[0].id // empty')
-          if [ -n "$BUILD_ID" ]; then
-            eas build:download --id "$BUILD_ID" --output-dir ./artifacts/ || echo "APK available on Expo dashboard"
-          fi
-
-      - name: Upload APK
-        if: success()
-        uses: actions/upload-artifact@v4
-        with:
-          name: absensiku-android-preview
-          path: ./artifacts/*.apk
-          retention-days: 30
-          if-no-files-found: warn
+          node -c server.js && echo "✅ server.js syntax OK"

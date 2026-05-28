@@ -19,7 +19,7 @@
         "buildType": "apk"
       },
       "env": {
-        "EXPO_PUBLIC_API_URL": "https://absensiku-api.example.com/api"
+        "EXPO_PUBLIC_API_URL": "https://absensiku-api.onrender.com/api"
       }
     },
     "production": {
@@ -27,7 +27,7 @@
         "buildType": "apk"
       },
       "env": {
-        "EXPO_PUBLIC_API_URL": "https://absensiku-api.example.com/api"
+        "EXPO_PUBLIC_API_URL": "https://absensiku-api.onrender.com/api"
       }
     }
   },
