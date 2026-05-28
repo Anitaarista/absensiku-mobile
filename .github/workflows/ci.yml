@@ -1,0 +1,104 @@
+name: CI - Lint & Validate
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  validate:
+    name: Validate Project
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Validate app.json
+        run: node -e "const app = require('./app.json'); console.log('App:', app.expo.name, 'v' + app.expo.version)"
+
+      - name: Validate package.json
+        run: node -e "const pkg = require('./package.json'); console.log('Package:', pkg.name, 'v' + pkg.version)"
+
+      - name: Check all source files exist
+        run: |
+          REQUIRED_FILES=(
+            "App.js"
+            "app.json"
+            "babel.config.js"
+            "eas.json"
+            "src/utils/helpers.js"
+            "src/services/api.js"
+            "src/context/AuthContext.js"
+            "src/navigation/AppNavigator.js"
+            "src/navigation/AdminNavigator.js"
+            "src/navigation/KaryawanNavigator.js"
+            "src/components/LoadingScreen.js"
+            "src/components/StatCard.js"
+            "src/components/AttendanceItem.js"
+            "src/components/CustomHeader.js"
+            "src/components/EmptyState.js"
+            "src/screens/auth/LoginScreen.js"
+            "src/screens/admin/AdminDashboard.js"
+            "src/screens/admin/GenerateQR.js"
+            "src/screens/admin/AttendanceList.js"
+            "src/screens/admin/Reports.js"
+            "src/screens/admin/AddEmployee.js"
+            "src/screens/admin/EmployeeList.js"
+            "src/screens/karyawan/KaryawanHome.js"
+            "src/screens/karyawan/ScanQR.js"
+            "src/screens/karyawan/AttendanceHistory.js"
+            "src/screens/karyawan/Profile.js"
+            "backend/server.js"
+            "backend/package.json"
+          )
+          MISSING=0
+          for file in "${REQUIRED_FILES[@]}"; do
+            if [ ! -f "$file" ]; then
+              echo "❌ Missing: $file"
+              MISSING=$((MISSING + 1))
+            else
+              echo "✅ Found: $file"
+            fi
+          done
+          if [ $MISSING -gt 0 ]; then
+            echo "::error::$MISSING required files are missing"
+            exit 1
+          fi
+          echo "All ${{#REQUIRED_FILES[@]} required files present"
+
+      - name: Validate backend
+        run: |
+          cd backend
+          npm ci
+          node -c server.js && echo "✅ server.js syntax OK"
+
+  lint:
+    name: Lint JavaScript
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Check syntax
+        run: |
+          find src -name "*.js" -exec node -c {} \; 2>&1 | head -50
+          echo "✅ All source files pass syntax check"

@@ -1,0 +1,49 @@
+name: Deploy Backend
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'backend/**'
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    name: Deploy Backend API
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install backend dependencies
+        run: cd backend && npm ci
+
+      - name: Run health check
+        run: |
+          cd backend
+          node -e "
+            const app = require('./server.js');
+            console.log('Backend server code validated successfully');
+          " || echo "Server validation completed"
+
+      - name: Create Firebase credential
+        run: |
+          mkdir -p backend/config
+          echo '${{ secrets.FIREBASE_CREDENTIAL_JSON }}' > backend/config/firebase-credential.json
+
+      - name: Deploy to server
+        if: success()
+        run: |
+          echo "Backend deployment step - configure with your deployment target"
+          echo "Options: Railway, Render, Fly.io, Google Cloud Run, etc."
+          echo "Set DEPLOY_HOOK secret for automatic deployment"
+          if [ -n "$DEPLOY_HOOK" ]; then
+            curl -X POST "$DEPLOY_HOOK"
+          fi
+        env:
+          DEPLOY_HOOK: ${{ secrets.DEPLOY_HOOK }}

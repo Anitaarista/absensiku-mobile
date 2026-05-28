@@ -1,0 +1,75 @@
+name: EAS Build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      build_profile:
+        description: 'Build profile (development, preview, production)'
+        required: true
+        default: 'preview'
+        type: choice
+        options:
+          - development
+          - preview
+          - production
+      platform:
+        description: 'Platform (android, ios, all)'
+        required: true
+        default: 'android'
+        type: choice
+        options:
+          - android
+          - ios
+          - all
+
+jobs:
+  build:
+    name: Build ${{ github.event.inputs.platform || 'android' }} (${{ github.event.inputs.build_profile || 'preview' }})
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+
+      - name: Setup Expo
+        uses: expo/expo-github-action@v8
+        with:
+          expo-version: latest
+          eas-version: latest
+          token: ${{ secrets.EXPO_TOKEN }}
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build on EAS (Android)
+        if: ${{ (github.event.inputs.platform || 'android') == 'android' || (github.event.inputs.platform || 'android') == 'all' }}
+        run: eas build --platform android --profile ${{ github.event.inputs.build_profile || 'preview' }} --non-interactive --wait
+
+      - name: Build on EAS (iOS)
+        if: ${{ github.event.inputs.platform == 'ios' || github.event.inputs.platform == 'all' }}
+        run: eas build --platform ios --profile ${{ github.event.inputs.build_profile || 'preview' }} --non-interactive --wait
+
+      - name: Download APK Artifact
+        if: ${{ (github.event.inputs.platform || 'android') == 'android' || (github.event.inputs.platform || 'android') == 'all' }}
+        run: |
+          BUILD_ID=$(eas build:list --platform android --limit 1 --json | jq -r '.[0].id')
+          if [ -n "$BUILD_ID" ] && [ "$BUILD_ID" != "null" ]; then
+            eas build:download --id $BUILD_ID --output-dir ./artifacts/
+          fi
+
+      - name: Upload APK Artifact
+        if: ${{ (github.event.inputs.platform || 'android') == 'android' || (github.event.inputs.platform || 'android') == 'all' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: absensiku-android-apk
+          path: ./artifacts/*.apk
+          retention-days: 30
