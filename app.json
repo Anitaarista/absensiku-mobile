@@ -18,14 +18,29 @@
         "backgroundColor": "#0D9488"
       },
       "package": "com.absensiku.mobile",
-      "permissions": ["CAMERA"]
+      "permissions": [
+        "CAMERA",
+        "android.permission.CAMERA",
+        "android.permission.RECORD_AUDIO"
+      ]
     },
     "plugins": [
-      ["expo-camera", { "cameraPermission": "Aplikasi membutuhkan akses kamera untuk memindai QR Code absensi." }],
-      ["expo-secure-store"]
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "Aplikasi membutuhkan akses kamera untuk memindai QR Code absensi."
+        }
+      ],
+      [
+        "expo-secure-store"
+      ]
     ],
     "extra": {
-      "apiUrl": "http://localhost:3000/api"
-    }
+      "apiUrl": "http://localhost:3000/api",
+      "eas": {
+        "projectId": "be179dec-a9d2-44d6-984a-7b074d209f9c"
+      }
+    },
+    "owner": "hyperlot999"
   }
 }
