@@ -23,27 +23,32 @@ jobs:
       - name: Install backend dependencies
         run: cd backend && npm ci
 
-      - name: Run health check
-        run: |
-          cd backend
-          node -e "
-            const app = require('./server.js');
-            console.log('Backend server code validated successfully');
-          " || echo "Server validation completed"
+      - name: Validate server syntax
+        run: cd backend && node -c server.js && echo "✅ Syntax OK"
 
-      - name: Create Firebase credential
-        run: |
-          mkdir -p backend/config
-          echo '${{ secrets.FIREBASE_CREDENTIAL_JSON }}' > backend/config/firebase-credential.json
-
-      - name: Deploy to server
-        if: success()
-        run: |
-          echo "Backend deployment step - configure with your deployment target"
-          echo "Options: Railway, Render, Fly.io, Google Cloud Run, etc."
-          echo "Set DEPLOY_HOOK secret for automatic deployment"
-          if [ -n "$DEPLOY_HOOK" ]; then
-            curl -X POST "$DEPLOY_HOOK"
-          fi
+      - name: Deploy to hosting
         env:
-          DEPLOY_HOOK: ${{ secrets.DEPLOY_HOOK }}
+          FIREBASE_CREDENTIAL: ${{ secrets.FIREBASE_CREDENTIAL }}
+          FIREBASE_DATABASE_URL: ${{ secrets.FIREBASE_DATABASE_URL }}
+          PORT: ${{ secrets.PORT || 3000 }}
+        run: |
+          echo "📦 Deploying AbsensiKu Backend API..."
+          echo ""
+          echo "🔧 Configure your deployment target:"
+          echo "   - Railway: Set DEPLOY_HOOK secret + connect repo"
+          echo "   - Render: Connect GitHub repo in dashboard"
+          echo "   - Fly.io: Use fly deploy command"
+          echo "   - Google Cloud Run: Use gcloud run deploy"
+          echo ""
+          echo "Required secrets for deployment:"
+          echo "   FIREBASE_CREDENTIAL - Firebase Admin SDK JSON (entire file content)"
+          echo "   FIREBASE_DATABASE_URL - Firebase DB URL"
+          echo ""
+          
+          # Auto-deploy via webhook if configured
+          if [ -n "$DEPLOY_HOOK" ]; then
+            echo "🚀 Triggering deployment via webhook..."
+            curl -X POST "$DEPLOY_HOOK" -s -o /dev/null -w "HTTP %{http_code}\n"
+          else
+            echo "⚠️ No DEPLOY_HOOK secret configured. Manual deployment required."
+          fi

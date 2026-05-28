@@ -7,23 +7,35 @@ const admin = require('firebase-admin');
 
 // ========================================
 // Firebase Initialization
+// Supports: FIREBASE_CREDENTIAL env var (JSON string), local file, or project ID fallback
 // ========================================
 if (admin.apps.length === 0) {
   try {
-    const serviceAccount = require('/home/z/my-project/upload/gen-lang-client-0173847591-firebase-adminsdk-fbsvc-0c9f6c5c70.json');
-    admin.initializeApp({
-      credential: admin.credential.cert(serviceAccount),
-      databaseURL: 'https://gen-lang-client-0173847591.firebaseio.com'
-    });
-    console.log('✅ Firebase initialized with service account');
-  } catch (e) {
-    console.log('⚠️ Firebase credential not found, using env vars or default config');
-    try {
+    // Method 1: Try FIREBASE_CREDENTIAL environment variable (JSON string)
+    if (process.env.FIREBASE_CREDENTIAL) {
+      const serviceAccount = JSON.parse(process.env.FIREBASE_CREDENTIAL);
       admin.initializeApp({
-        projectId: 'gen-lang-client-0173847591',
+        credential: admin.credential.cert(serviceAccount),
+        databaseURL: process.env.FIREBASE_DATABASE_URL || 'https://gen-lang-client-0173847591.firebaseio.com'
+      });
+      console.log('✅ Firebase initialized with FIREBASE_CREDENTIAL env var');
+    } else {
+      // Method 2: Try local credential file
+      const serviceAccount = require('/home/z/my-project/upload/gen-lang-client-0173847591-firebase-adminsdk-fbsvc-0c9f6c5c70.json');
+      admin.initializeApp({
+        credential: admin.credential.cert(serviceAccount),
         databaseURL: 'https://gen-lang-client-0173847591.firebaseio.com'
       });
-      console.log('✅ Firebase initialized with project ID');
+      console.log('✅ Firebase initialized with service account file');
+    }
+  } catch (e) {
+    console.log('⚠️ Firebase credential not found via env/file, using project ID fallback');
+    try {
+      admin.initializeApp({
+        projectId: process.env.FIREBASE_PROJECT_ID || 'gen-lang-client-0173847591',
+        databaseURL: process.env.FIREBASE_DATABASE_URL || 'https://gen-lang-client-0173847591.firebaseio.com'
+      });
+      console.log('✅ Firebase initialized with project ID (limited access)');
     } catch (initErr) {
       console.log('❌ Firebase initialization failed:', initErr.message);
     }
