@@ -33,7 +33,8 @@ const AttendanceHistory = () => {
 
   const fetchData = useCallback(async () => {
     try {
-      const response = await attendanceAPI.getMy();
+      const uid = user?.uid || user?.id;
+      const response = await attendanceAPI.getMy({ uid });
       if (response.data?.data) {
         const data = response.data.data.records || [];
         setRecords(data);
@@ -45,7 +46,7 @@ const AttendanceHistory = () => {
       setLoading(false);
       setRefreshing(false);
     }
-  }, [activeFilter]);
+  }, [activeFilter, user?.uid]);
 
   useEffect(() => {
     fetchData();

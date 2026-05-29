@@ -2,6 +2,18 @@ import React, { createContext, useContext, useState, useEffect, useCallback } fr
 import * as SecureStore from 'expo-secure-store';
 import { authAPI } from '../services/api';
 
+// Export uid helper for API calls that need it
+export const getAuthUid = async () => {
+  try {
+    const storedUser = await SecureStore.getItemAsync('auth_user');
+    if (storedUser) {
+      const parsed = JSON.parse(storedUser);
+      return parsed?.uid || parsed?.id;
+    }
+  } catch (e) {}
+  return null;
+};
+
 const AuthContext = createContext(null);
 
 export const useAuth = () => {

@@ -34,7 +34,8 @@ const KaryawanHome = ({ navigation }) => {
   const fetchData = useCallback(async () => {
     try {
       const today = new Date().toISOString().split('T')[0];
-      const response = await attendanceAPI.getMy({ date: today });
+      const uid = user?.uid || user?.id;
+      const response = await attendanceAPI.getMy({ uid, date: today });
       if (response.data?.data) {
         const records = response.data.data.records || [];
         const todayRec = records.find((r) => r.date === today);
@@ -47,7 +48,7 @@ const KaryawanHome = ({ navigation }) => {
       setLoading(false);
       setRefreshing(false);
     }
-  }, []);
+  }, [user?.uid]);
 
   useEffect(() => {
     fetchData();

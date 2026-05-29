@@ -5,18 +5,18 @@ import {
   StyleSheet,
   ScrollView,
   TouchableOpacity,
-  Image,
   Alert,
   RefreshControl,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
+import QRCode from 'react-native-qrcode-svg';
 import { qrAPI } from '../../services/api';
 import { formatDateTime, formatDate, formatTime } from '../../utils/helpers';
 
 const GenerateQR = () => {
   const [session, setSession] = useState(null);
-  const [qrImage, setQrImage] = useState(null);
+  const [qrData, setQrData] = useState(null);
   const [loading, setLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
 
@@ -25,7 +25,7 @@ const GenerateQR = () => {
       const response = await qrAPI.getActive();
       if (response.data?.data?.session) {
         setSession(response.data.data.session);
-        setQrImage(response.data.data.qrImage || null);
+        setQrData(response.data.data.qrData || null);
       }
     } catch (error) {
       console.log('No active QR session');
@@ -44,7 +44,7 @@ const GenerateQR = () => {
       });
       if (response.data?.data) {
         setSession(response.data.data.session);
-        setQrImage(response.data.data.qrImage || null);
+        setQrData(response.data.data.qrData || null);
         Alert.alert('Berhasil', 'QR Code absensi berhasil dibuat!');
       }
     } catch (error) {
@@ -83,12 +83,13 @@ const GenerateQR = () => {
 
         {/* QR Display Area */}
         <View style={styles.qrSection}>
-          {qrImage ? (
+          {qrData ? (
             <View style={styles.qrContainer}>
-              <Image
-                source={{ uri: `data:image/png;base64,${qrImage}` }}
-                style={styles.qrImage}
-                resizeMode="contain"
+              <QRCode
+                value={qrData}
+                size={220}
+                color="#000000"
+                backgroundColor="#FFFFFF"
               />
               {isExpired && (
                 <View style={styles.expiredOverlay}>
@@ -241,10 +242,8 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.1,
     shadowRadius: 12,
     elevation: 5,
-  },
-  qrImage: {
-    width: 220,
-    height: 220,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   expiredOverlay: {
     ...StyleSheet.absoluteFillObject,
