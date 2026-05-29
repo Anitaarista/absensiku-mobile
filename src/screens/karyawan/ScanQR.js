@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   View,
   Text,
@@ -8,7 +8,7 @@ import {
   ActivityIndicator,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
-import { BarCodeScanner } from 'expo-barcode-scanner';
+import { CameraView } from 'expo-camera';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../../context/AuthContext';
 import { qrAPI } from '../../services/api';
@@ -18,12 +18,13 @@ const ScanQR = () => {
   const [hasPermission, setHasPermission] = useState(null);
   const [scanned, setScanned] = useState(false);
   const [processing, setProcessing] = useState(false);
-  const [result, setResult] = useState(null); // { success: bool, message: string, data: object }
+  const [result, setResult] = useState(null);
 
   useEffect(() => {
     (async () => {
       try {
-        const { status } = await BarCodeScanner.requestPermissionsAsync();
+        const { Camera } = require('expo-camera');
+        const { status } = await Camera.requestCameraPermissionsAsync();
         setHasPermission(status === 'granted');
       } catch (e) {
         setHasPermission(false);
@@ -168,12 +169,16 @@ const ScanQR = () => {
     );
   }
 
-  // Scanner view
+  // Scanner view using CameraView from expo-camera
   return (
     <View style={styles.scannerContainer}>
-      <BarCodeScanner
-        onBarCodeScanned={handleBarCodeScanned}
+      <CameraView
         style={StyleSheet.absoluteFillObject}
+        facing="back"
+        onBarcodeScanned={scanned ? undefined : handleBarCodeScanned}
+        barcodeScannerSettings={{
+          barcodeTypes: ['qr'],
+        }}
       />
 
       {/* Overlay */}
