@@ -3,63 +3,419 @@ const cors = require('cors');
 const crypto = require('crypto');
 const { v4: uuidv4 } = require('uuid');
 const QRCode = require('qrcode');
-const admin = require('firebase-admin');
+const fs = require('fs');
+const path = require('path');
 
 // ========================================
-// Firebase Initialization
-// Supports: FIREBASE_CREDENTIAL env var (JSON string), local file, or project ID fallback
+// Firebase Initialization - Supports Admin SDK (Service Account) and Client SDK (fallback)
 // ========================================
 const FIREBASE_PROJECT_ID = process.env.FIREBASE_PROJECT_ID || 'gen-lang-client-0173847591';
 const FIREBASE_DATABASE_URL = process.env.FIREBASE_DATABASE_URL || `https://${FIREBASE_PROJECT_ID}.firebaseio.com`;
 
-if (admin.apps.length === 0) {
+let db = null;
+let admin = null;
+let useAdminSDK = false;
+let fieldValueServerTimestamp = null;
+let fieldValueIncrement = null;
+
+// Firebase configuration (same as mobile app)
+const firebaseConfig = {
+  apiKey: 'AIzaSyC4Lfbd9Z4WPlZvO0kAU6HrZpDQ6zlPiDU',
+  authDomain: 'gen-lang-client-0173847591.firebaseapp.com',
+  projectId: 'gen-lang-client-0173847591',
+  storageBucket: 'gen-lang-client-0173847591.firebasestorage.app',
+  messagingSenderId: '1087219440433',
+  appId: '1:1087219440433:android:0b092c1a6b58b828db2e10',
+};
+
+// Try Firebase Admin SDK with Service Account first
+async function initializeFirebase() {
+  // Method 1: Try Firebase Admin SDK with serviceAccountKey.json
   try {
-    // Method 1: Try FIREBASE_CREDENTIAL environment variable (base64 encoded JSON)
-    if (process.env.FIREBASE_CREDENTIAL) {
-      let serviceAccount;
+    admin = require('firebase-admin');
+    const serviceAccountPath = path.join(__dirname, 'serviceAccountKey.json');
+
+    let initialized = false;
+
+    if (fs.existsSync(serviceAccountPath)) {
       try {
-        // Try base64 decode first (for GitHub Actions secrets)
-        serviceAccount = JSON.parse(Buffer.from(process.env.FIREBASE_CREDENTIAL, 'base64').toString('utf8'));
-      } catch {
-        // Fallback to plain JSON string
-        serviceAccount = JSON.parse(process.env.FIREBASE_CREDENTIAL);
+        const serviceAccount = JSON.parse(fs.readFileSync(serviceAccountPath, 'utf8'));
+        if (serviceAccount.private_key && serviceAccount.private_key !== 'REPLACE_WITH_YOUR_PRIVATE_KEY') {
+          admin.initializeApp({
+            credential: admin.credential.cert(serviceAccount),
+            databaseURL: FIREBASE_DATABASE_URL,
+          });
+          console.log('✅ Firebase Admin SDK initialized with serviceAccountKey.json');
+          initialized = true;
+        }
+      } catch (e) {
+        console.log('⚠️ serviceAccountKey.json found but invalid:', e.message);
       }
-      admin.initializeApp({
-        credential: admin.credential.cert(serviceAccount),
-        databaseURL: FIREBASE_DATABASE_URL,
-      });
-      console.log('✅ Firebase initialized with FIREBASE_CREDENTIAL env var');
-    } else if (process.env.GOOGLE_APPLICATION_CREDENTIALS) {
-      // Method 2: Use GOOGLE_APPLICATION_CREDENTIALS env var (file path)
-      const serviceAccount = require(process.env.GOOGLE_APPLICATION_CREDENTIALS);
-      admin.initializeApp({
-        credential: admin.credential.cert(serviceAccount),
-        databaseURL: FIREBASE_DATABASE_URL,
-      });
-      console.log('✅ Firebase initialized with GOOGLE_APPLICATION_CREDENTIALS file');
-    } else {
-      // Method 3: Fallback to project ID (limited access - Firestore only, no auth)
-      admin.initializeApp({
-        projectId: FIREBASE_PROJECT_ID,
-        databaseURL: FIREBASE_DATABASE_URL,
-      });
-      console.log('✅ Firebase initialized with project ID fallback (limited access)');
+    }
+
+    // Method 2: Try FIREBASE_CREDENTIAL env var (base64 encoded JSON)
+    if (!initialized && process.env.FIREBASE_CREDENTIAL) {
+      try {
+        let serviceAccount;
+        try {
+          serviceAccount = JSON.parse(Buffer.from(process.env.FIREBASE_CREDENTIAL, 'base64').toString('utf8'));
+        } catch {
+          serviceAccount = JSON.parse(process.env.FIREBASE_CREDENTIAL);
+        }
+        admin.initializeApp({
+          credential: admin.credential.cert(serviceAccount),
+          databaseURL: FIREBASE_DATABASE_URL,
+        });
+        console.log('✅ Firebase Admin SDK initialized with FIREBASE_CREDENTIAL env var');
+        initialized = true;
+      } catch (e) {
+        console.log('⚠️ FIREBASE_CREDENTIAL env var found but invalid:', e.message);
+      }
+    }
+
+    // Method 3: Try GOOGLE_APPLICATION_CREDENTIALS env var
+    if (!initialized && process.env.GOOGLE_APPLICATION_CREDENTIALS) {
+      try {
+        const credPath = process.env.GOOGLE_APPLICATION_CREDENTIALS;
+        const serviceAccount = JSON.parse(fs.readFileSync(credPath, 'utf8'));
+        admin.initializeApp({
+          credential: admin.credential.cert(serviceAccount),
+          databaseURL: FIREBASE_DATABASE_URL,
+        });
+        console.log('✅ Firebase Admin SDK initialized with GOOGLE_APPLICATION_CREDENTIALS');
+        initialized = true;
+      } catch (e) {
+        console.log('⚠️ GOOGLE_APPLICATION_CREDENTIALS found but invalid:', e.message);
+      }
+    }
+
+    // Method 4: Try Application Default Credentials
+    if (!initialized) {
+      try {
+        admin.initializeApp({
+          credential: admin.credential.applicationDefault(),
+          databaseURL: FIREBASE_DATABASE_URL,
+          projectId: FIREBASE_PROJECT_ID,
+        });
+        // Test if ADC actually works
+        const testDb = admin.firestore();
+        await testDb.collection('users').limit(1).get();
+        console.log('✅ Firebase Admin SDK initialized with Application Default Credentials');
+        initialized = true;
+      } catch (e) {
+        console.log('⚠️ Application Default Credentials not available:', e.message);
+        // Delete the failed app so we can reinitialize
+        try { admin.app().delete(); } catch (delErr) { /* ignore */ }
+      }
+    }
+
+    if (initialized) {
+      db = admin.firestore();
+      useAdminSDK = true;
+      fieldValueServerTimestamp = admin.firestore.FieldValue.serverTimestamp;
+      fieldValueIncrement = admin.firestore.FieldValue.increment;
+      console.log('🔒 Using Firebase Admin SDK - bypasses Firestore Security Rules');
+      return;
     }
   } catch (e) {
-    console.log('❌ Firebase initialization failed:', e.message);
-    try {
-      admin.initializeApp({
-        projectId: FIREBASE_PROJECT_ID,
-        databaseURL: FIREBASE_DATABASE_URL,
-      });
-      console.log('✅ Firebase initialized with project ID fallback (limited access)');
-    } catch (initErr) {
-      console.log('❌ Firebase initialization completely failed:', initErr.message);
-    }
+    console.log('⚠️ Firebase Admin SDK not available:', e.message);
   }
-}
 
-const db = admin.firestore();
+  // Fallback: Use Firebase Client SDK (works without Service Account)
+  try {
+    const firebase = require('firebase/firestore');
+    const firebaseApp = require('firebase/app');
+
+    console.log('🔄 Falling back to Firebase Client SDK...');
+    console.log('⚠️ For production, use Firebase Admin SDK with Service Account for better security');
+
+    const app = firebaseApp.initializeApp(firebaseConfig);
+    db = firebase.getFirestore(app);
+
+    // Create compatibility layer for Admin SDK methods
+    fieldValueServerTimestamp = () => firebase.serverTimestamp();
+    fieldValueIncrement = (n) => firebase.increment(n);
+
+    // Wrap Firestore with Admin SDK-like interface
+    const origDb = db;
+    db = {
+      collection: (collectionPath) => {
+        const colRef = firebase.collection(origDb, collectionPath);
+        return {
+          where: (field, op, value) => {
+            let q = firebase.query(colRef, firebase.where(field, op, value));
+            return {
+              where: (field2, op2, value2) => {
+                q = firebase.query(q, firebase.where(field2, op2, value2));
+                return {
+                  orderBy: (field3, dir3) => {
+                    q = firebase.query(q, firebase.orderBy(field3, dir3));
+                    return {
+                      limit: (n) => {
+                        q = firebase.query(q, firebase.limit(n));
+                        return {
+                          get: async () => {
+                            const snap = await firebase.getDocs(q);
+                            return {
+                              empty: snap.empty,
+                              size: snap.size,
+                              docs: snap.docs.map(d => ({
+                                id: d.id,
+                                data: () => d.data(),
+                                ref: d.ref,
+                                exists: true,
+                              })),
+                              forEach: (cb) => snap.docs.forEach(cb),
+                            };
+                          },
+                        };
+                      },
+                      get: async () => {
+                        const snap = await firebase.getDocs(q);
+                        return {
+                          empty: snap.empty,
+                          size: snap.size,
+                          docs: snap.docs.map(d => ({
+                            id: d.id,
+                            data: () => d.data(),
+                            ref: d.ref,
+                            exists: true,
+                          })),
+                          forEach: (cb) => snap.docs.forEach(cb),
+                        };
+                      },
+                    };
+                  },
+                  limit: (n) => {
+                    q = firebase.query(q, firebase.limit(n));
+                    return {
+                      get: async () => {
+                        const snap = await firebase.getDocs(q);
+                        return {
+                          empty: snap.empty,
+                          size: snap.size,
+                          docs: snap.docs.map(d => ({
+                            id: d.id,
+                            data: () => d.data(),
+                            ref: d.ref,
+                            exists: true,
+                          })),
+                          forEach: (cb) => snap.docs.forEach(cb),
+                        };
+                      },
+                    };
+                  },
+                  get: async () => {
+                    const snap = await firebase.getDocs(q);
+                    return {
+                      empty: snap.empty,
+                      size: snap.size,
+                      docs: snap.docs.map(d => ({
+                        id: d.id,
+                        data: () => d.data(),
+                        ref: d.ref,
+                        exists: true,
+                      })),
+                      forEach: (cb) => snap.docs.forEach(cb),
+                    };
+                  },
+                };
+              },
+              orderBy: (field2, dir2) => {
+                q = firebase.query(q, firebase.orderBy(field2, dir2));
+                return {
+                  limit: (n) => {
+                    q = firebase.query(q, firebase.limit(n));
+                    return {
+                      get: async () => {
+                        const snap = await firebase.getDocs(q);
+                        return {
+                          empty: snap.empty,
+                          size: snap.size,
+                          docs: snap.docs.map(d => ({
+                            id: d.id,
+                            data: () => d.data(),
+                            ref: d.ref,
+                            exists: true,
+                          })),
+                          forEach: (cb) => snap.docs.forEach(cb),
+                        };
+                      },
+                    };
+                  },
+                  get: async () => {
+                    const snap = await firebase.getDocs(q);
+                    return {
+                      empty: snap.empty,
+                      size: snap.size,
+                      docs: snap.docs.map(d => ({
+                        id: d.id,
+                        data: () => d.data(),
+                        ref: d.ref,
+                        exists: true,
+                      })),
+                      forEach: (cb) => snap.docs.forEach(cb),
+                    };
+                  },
+                };
+              },
+              limit: (n) => {
+                q = firebase.query(q, firebase.limit(n));
+                return {
+                  get: async () => {
+                    const snap = await firebase.getDocs(q);
+                    return {
+                      empty: snap.empty,
+                      size: snap.size,
+                      docs: snap.docs.map(d => ({
+                        id: d.id,
+                        data: () => d.data(),
+                        ref: d.ref,
+                        exists: true,
+                      })),
+                      forEach: (cb) => snap.docs.forEach(cb),
+                    };
+                  },
+                };
+              },
+              get: async () => {
+                const snap = await firebase.getDocs(q);
+                return {
+                  empty: snap.empty,
+                  size: snap.size,
+                  docs: snap.docs.map(d => ({
+                    id: d.id,
+                    data: () => d.data(),
+                    ref: d.ref,
+                    exists: true,
+                  })),
+                  forEach: (cb) => snap.docs.forEach(cb),
+                };
+              },
+            };
+          },
+          orderBy: (field, dir) => {
+            let q = firebase.query(colRef, firebase.orderBy(field, dir));
+            return {
+              limit: (n) => {
+                q = firebase.query(q, firebase.limit(n));
+                return {
+                  get: async () => {
+                    const snap = await firebase.getDocs(q);
+                    return {
+                      empty: snap.empty,
+                      size: snap.size,
+                      docs: snap.docs.map(d => ({
+                        id: d.id,
+                        data: () => d.data(),
+                        ref: d.ref,
+                        exists: true,
+                      })),
+                      forEach: (cb) => snap.docs.forEach(cb),
+                    };
+                  },
+                };
+              },
+              get: async () => {
+                const snap = await firebase.getDocs(q);
+                return {
+                  empty: snap.empty,
+                  size: snap.size,
+                  docs: snap.docs.map(d => ({
+                    id: d.id,
+                    data: () => d.data(),
+                    ref: d.ref,
+                    exists: true,
+                  })),
+                  forEach: (cb) => snap.docs.forEach(cb),
+                };
+              },
+            };
+          },
+          limit: (n) => {
+            const q = firebase.query(colRef, firebase.limit(n));
+            return {
+              get: async () => {
+                const snap = await firebase.getDocs(q);
+                return {
+                  empty: snap.empty,
+                  size: snap.size,
+                  docs: snap.docs.map(d => ({
+                    id: d.id,
+                    data: () => d.data(),
+                    ref: d.ref,
+                    exists: true,
+                  })),
+                  forEach: (cb) => snap.docs.forEach(cb),
+                };
+              },
+            };
+          },
+          get: async () => {
+            const snap = await firebase.getDocs(colRef);
+            return {
+              empty: snap.empty,
+              size: snap.size,
+              docs: snap.docs.map(d => ({
+                id: d.id,
+                data: () => d.data(),
+                ref: d.ref,
+                exists: true,
+              })),
+              forEach: (cb) => snap.docs.forEach(cb),
+            };
+          },
+        };
+      },
+      doc: (collectionPath, docPath) => {
+        const docRef = firebase.doc(origDb, collectionPath, docPath);
+        return {
+          get: async () => {
+            const snap = await firebase.getDoc(docRef);
+            return {
+              exists: snap.exists(),
+              id: snap.id,
+              data: () => snap.data(),
+              ref: docRef,
+            };
+          },
+          set: async (data, options) => {
+            await firebase.setDoc(docRef, data, options);
+          },
+          update: async (data) => {
+            await firebase.updateDoc(docRef, data);
+          },
+          delete: async () => {
+            await firebase.deleteDoc(docRef);
+          },
+        };
+      },
+      batch: () => {
+        const batch = firebase.writeBatch(origDb);
+        return {
+          update: (docRefObj, data) => {
+            // docRefObj needs to be a Firestore DocumentReference
+            const realRef = firebase.doc(origDb, docRefObj._path?.segments?.[0], docRefObj._path?.segments?.[1]) || docRefObj;
+            batch.update(realRef, data);
+          },
+          commit: async () => {
+            await batch.commit();
+          },
+        };
+      },
+    };
+
+    useAdminSDK = false;
+    console.log('✅ Firebase Client SDK initialized (fallback mode)');
+    console.log('📝 Firestore Security Rules will apply (ensure rules allow access)');
+    return;
+  } catch (e) {
+    console.log('❌ Firebase Client SDK also failed:', e.message);
+  }
+
+  console.log('❌ All Firebase initialization methods failed. Server cannot start.');
+  process.exit(1);
+}
 
 // ========================================
 // Express App Setup
@@ -67,7 +423,11 @@ const db = admin.firestore();
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-app.use(cors());
+app.use(cors({
+  origin: '*',
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Auth-Token'],
+}));
 app.use(express.json({ limit: '10mb' }));
 
 // Request logging
@@ -99,23 +459,80 @@ const formatDate = (date) => {
   return new Date(date).toISOString().split('T')[0];
 };
 
-const isFirestoreAvailable = () => {
-  return db !== undefined && db !== null;
+const serverTimestamp = () => fieldValueServerTimestamp();
+const increment = (n) => fieldValueIncrement(n);
+
+// ========================================
+// Auth Middleware - Verify Token
+// ========================================
+const authMiddleware = async (req, res, next) => {
+  try {
+    const authHeader = req.headers.authorization;
+    const token = authHeader?.replace('Bearer ', '') || req.headers['x-auth-token'] || req.query.token;
+
+    if (!token) {
+      return errorResponse(res, 'UNAUTHORIZED', 'Token tidak ditemukan. Silakan login kembali.', 401);
+    }
+
+    // Check if token exists in Firestore
+    const tokenDoc = await db.collection('tokens').doc(token).get();
+
+    if (!tokenDoc.exists) {
+      return errorResponse(res, 'INVALID_TOKEN', 'Token tidak valid. Silakan login kembali.', 401);
+    }
+
+    const tokenData = tokenDoc.data();
+
+    // Check if token is expired
+    if (tokenData.expiresAt && new Date(tokenData.expiresAt) < new Date()) {
+      await db.collection('tokens').doc(token).delete();
+      return errorResponse(res, 'TOKEN_EXPIRED', 'Token sudah expired. Silakan login kembali.', 401);
+    }
+
+    // Attach user info to request
+    req.token = token;
+    req.uid = tokenData.uid;
+
+    // Fetch user data
+    const userDoc = await db.collection('users').doc(tokenData.uid).get();
+    if (userDoc.exists) {
+      req.user = { uid: userDoc.id, ...userDoc.data() };
+    }
+
+    next();
+  } catch (error) {
+    console.error('Auth middleware error:', error);
+    return errorResponse(res, 'AUTH_ERROR', 'Terjadi kesalahan autentikasi', 401);
+  }
 };
 
 // ========================================
 // Health Check
 // ========================================
-app.get('/api/health', (req, res) => {
+app.get('/api/health', async (req, res) => {
+  let firebaseStatus = 'not configured';
+  let dbTest = false;
+
+  try {
+    const snap = await db.collection('users').limit(1).get();
+    dbTest = true;
+    firebaseStatus = useAdminSDK ? 'admin-sdk' : 'client-sdk';
+  } catch (e) {
+    firebaseStatus = 'error: ' + e.message;
+  }
+
   return successResponse(res, {
     status: 'ok',
     timestamp: new Date().toISOString(),
-    firebase: admin.apps.length > 0 ? 'connected' : 'not configured',
+    firebase: firebaseStatus,
+    firestoreAccess: dbTest,
+    projectId: FIREBASE_PROJECT_ID,
+    sdk: useAdminSDK ? 'admin' : 'client',
   });
 });
 
 // ========================================
-// Auth Routes
+// Auth Routes (Public - No Auth Required)
 // ========================================
 
 // POST /api/auth/login
@@ -125,10 +542,6 @@ app.post('/api/auth/login', async (req, res) => {
 
     if (!email || !password) {
       return errorResponse(res, 'VALIDATION_ERROR', 'Email dan password wajib diisi');
-    }
-
-    if (!isFirestoreAvailable()) {
-      return errorResponse(res, 'SERVICE_UNAVAILABLE', 'Database tidak tersedia', 503);
     }
 
     // Find user by email
@@ -154,8 +567,8 @@ app.post('/api/auth/login', async (req, res) => {
     // Store token
     await db.collection('tokens').doc(token).set({
       uid: userDoc.id,
-      createdAt: admin.firestore.FieldValue.serverTimestamp(),
-      expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000), // 7 days
+      createdAt: serverTimestamp(),
+      expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000), // 30 days
     });
 
     // Return user data (without password)
@@ -170,20 +583,19 @@ app.post('/api/auth/login', async (req, res) => {
   }
 });
 
-// POST /api/auth/register
-app.post('/api/auth/register', async (req, res) => {
+// POST /api/auth/register (Admin only)
+app.post('/api/auth/register', authMiddleware, async (req, res) => {
   try {
+    if (req.user?.role !== 'admin') {
+      return errorResponse(res, 'FORBIDDEN', 'Hanya admin yang dapat menambahkan karyawan baru', 403);
+    }
+
     const { name, email, password, nip, jabatan, divisi, role } = req.body;
 
     if (!name || !email || !password) {
       return errorResponse(res, 'VALIDATION_ERROR', 'Nama, email, dan password wajib diisi');
     }
 
-    if (!isFirestoreAvailable()) {
-      return errorResponse(res, 'SERVICE_UNAVAILABLE', 'Database tidak tersedia', 503);
-    }
-
-    // Check if email already exists
     const existingSnapshot = await db.collection('users')
       .where('email', '==', email.toLowerCase().trim())
       .limit(1)
@@ -204,24 +616,15 @@ app.post('/api/auth/register', async (req, res) => {
       jabatan: jabatan || '',
       divisi: divisi || '',
       role: role || 'karyawan',
-      createdAt: admin.firestore.FieldValue.serverTimestamp(),
-      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
     };
 
     await db.collection('users').doc(uid).set(userData);
 
-    // Generate token
-    const token = generateToken();
-    await db.collection('tokens').doc(token).set({
-      uid,
-      createdAt: admin.firestore.FieldValue.serverTimestamp(),
-      expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
-    });
-
     const { password: _, ...userWithoutPassword } = userData;
     return successResponse(res, {
       user: { uid, ...userWithoutPassword },
-      token,
     }, 201);
   } catch (error) {
     console.error('Register error:', error);
@@ -229,35 +632,51 @@ app.post('/api/auth/register', async (req, res) => {
   }
 });
 
-// ========================================
-// Attendance Routes
-// ========================================
-
-// GET /api/attendance (with filters)
-app.get('/api/attendance', async (req, res) => {
+// GET /api/auth/me
+app.get('/api/auth/me', authMiddleware, async (req, res) => {
   try {
-    if (!isFirestoreAvailable()) {
-      return errorResponse(res, 'SERVICE_UNAVAILABLE', 'Database tidak tersedia', 503);
+    if (!req.user) {
+      return errorResponse(res, 'NOT_FOUND', 'User tidak ditemukan', 404);
     }
+    const { password: _, ...userWithoutPassword } = req.user;
+    return successResponse(res, { user: userWithoutPassword });
+  } catch (error) {
+    console.error('Get me error:', error);
+    return errorResponse(res, 'SERVER_ERROR', 'Terjadi kesalahan pada server', 500);
+  }
+});
 
+// POST /api/auth/logout
+app.post('/api/auth/logout', authMiddleware, async (req, res) => {
+  try {
+    if (req.token) {
+      await db.collection('tokens').doc(req.token).delete();
+    }
+    return successResponse(res, { message: 'Logout berhasil' });
+  } catch (error) {
+    console.error('Logout error:', error);
+    return errorResponse(res, 'SERVER_ERROR', 'Terjadi kesalahan pada server', 500);
+  }
+});
+
+// ========================================
+// Attendance Routes (Auth Required)
+// ========================================
+
+// GET /api/attendance
+app.get('/api/attendance', authMiddleware, async (req, res) => {
+  try {
     let query = db.collection('attendance');
 
-    const { date, status, uid, limit, offset } = req.query;
+    const { date, status, uid, limit } = req.query;
 
-    if (date) {
-      query = query.where('date', '==', date);
-    }
-    if (status) {
-      query = query.where('status', '==', status.toLowerCase());
-    }
-    if (uid) {
-      query = query.where('uid', '==', uid);
-    }
+    if (date) query = query.where('date', '==', date);
+    if (status) query = query.where('status', '==', status.toLowerCase());
+    if (uid) query = query.where('uid', '==', uid);
 
     query = query.orderBy('createdAt', 'desc');
 
     const limitNum = parseInt(limit) || 50;
-    const offsetNum = parseInt(offset) || 0;
     query = query.limit(limitNum);
 
     const snapshot = await query.get();
@@ -265,7 +684,6 @@ app.get('/api/attendance', async (req, res) => {
     const records = [];
     for (const doc of snapshot.docs) {
       const data = doc.data();
-      // Fetch user info
       let userName = data.userName || '';
       let userNip = data.userNip || '';
       if (data.uid) {
@@ -275,16 +693,9 @@ app.get('/api/attendance', async (req, res) => {
             userName = userDoc.data().name || userName;
             userNip = userDoc.data().nip || userNip;
           }
-        } catch (e) {
-          // Use cached values
-        }
+        } catch (e) { /* Use cached values */ }
       }
-      records.push({
-        id: doc.id,
-        ...data,
-        userName,
-        userNip,
-      });
+      records.push({ id: doc.id, ...data, userName, userNip });
     }
 
     return successResponse(res, { records, total: records.length });
@@ -294,51 +705,38 @@ app.get('/api/attendance', async (req, res) => {
   }
 });
 
-// GET /api/attendance/my (by uid query param)
-app.get('/api/attendance/my', async (req, res) => {
+// GET /api/attendance/my
+app.get('/api/attendance/my', authMiddleware, async (req, res) => {
   try {
-    const { uid, date } = req.query;
-
-    if (!uid) {
-      return errorResponse(res, 'VALIDATION_ERROR', 'UID wajib diisi');
-    }
-
-    if (!isFirestoreAvailable()) {
-      return errorResponse(res, 'SERVICE_UNAVAILABLE', 'Database tidak tersedia', 503);
-    }
+    const { date } = req.query;
+    const uid = req.uid;
 
     let query = db.collection('attendance').where('uid', '==', uid);
-
-    if (date) {
-      query = query.where('date', '==', date);
-    }
-
+    if (date) query = query.where('date', '==', date);
     query = query.orderBy('createdAt', 'desc');
 
     const snapshot = await query.get();
 
-    const records = [];
-    for (const doc of snapshot.docs) {
-      const data = doc.data();
-      // Fetch user info
-      let userName = data.userName || '';
-      let userNip = data.userNip || '';
-      try {
-        const userDoc = await db.collection('users').doc(uid).get();
-        if (userDoc.exists) {
-          userName = userDoc.data().name || userName;
-          userNip = userDoc.data().nip || userNip;
-        }
-      } catch (e) {
-        // Use cached values
+    let userName = '';
+    let userNip = '';
+    try {
+      const userDoc = await db.collection('users').doc(uid).get();
+      if (userDoc.exists) {
+        userName = userDoc.data().name || '';
+        userNip = userDoc.data().nip || '';
       }
+    } catch (e) { /* Use cached values */ }
+
+    const records = [];
+    snapshot.forEach(doc => {
+      const data = doc.data();
       records.push({
         id: doc.id,
         ...data,
-        userName,
-        userNip,
+        userName: data.userName || userName,
+        userNip: data.userNip || userNip,
       });
-    }
+    });
 
     return successResponse(res, { records, total: records.length });
   } catch (error) {
@@ -348,20 +746,14 @@ app.get('/api/attendance/my', async (req, res) => {
 });
 
 // GET /api/attendance/stats
-app.get('/api/attendance/stats', async (req, res) => {
+app.get('/api/attendance/stats', authMiddleware, async (req, res) => {
   try {
     const { date } = req.query;
     const targetDate = date || formatDate(new Date());
 
-    if (!isFirestoreAvailable()) {
-      return errorResponse(res, 'SERVICE_UNAVAILABLE', 'Database tidak tersedia', 503);
-    }
-
-    // Get total employees (karyawan role)
     const usersSnapshot = await db.collection('users').where('role', '==', 'karyawan').get();
     const totalEmployees = usersSnapshot.size;
 
-    // Get today's attendance
     const attendanceSnapshot = await db.collection('attendance')
       .where('date', '==', targetDate)
       .get();
@@ -377,7 +769,6 @@ app.get('/api/attendance/stats', async (req, res) => {
       else if (status === 'alpha') alpha++;
     });
 
-    // 7-day trend
     const weeklyTrend = [];
     for (let i = 6; i >= 0; i--) {
       const d = new Date();
@@ -397,19 +788,8 @@ app.get('/api/attendance/stats', async (req, res) => {
     }
 
     return successResponse(res, {
-      summary: {
-        totalEmployees,
-        hadir,
-        izin,
-        sakit,
-        alpha,
-      },
-      breakdown: {
-        hadir,
-        izin,
-        sakit,
-        alpha,
-      },
+      summary: { totalEmployees, hadir, izin, sakit, alpha },
+      breakdown: { hadir, izin, sakit, alpha },
       weeklyTrend,
     });
   } catch (error) {
@@ -419,7 +799,7 @@ app.get('/api/attendance/stats', async (req, res) => {
 });
 
 // POST /api/attendance
-app.post('/api/attendance', async (req, res) => {
+app.post('/api/attendance', authMiddleware, async (req, res) => {
   try {
     const { uid, date, status, checkIn, checkOut, note } = req.body;
 
@@ -427,14 +807,9 @@ app.post('/api/attendance', async (req, res) => {
       return errorResponse(res, 'VALIDATION_ERROR', 'UID wajib diisi');
     }
 
-    if (!isFirestoreAvailable()) {
-      return errorResponse(res, 'SERVICE_UNAVAILABLE', 'Database tidak tersedia', 503);
-    }
-
     const id = uuidv4();
     const targetDate = date || formatDate(new Date());
 
-    // Fetch user info
     let userName = '';
     let userNip = '';
     try {
@@ -443,9 +818,7 @@ app.post('/api/attendance', async (req, res) => {
         userName = userDoc.data().name || '';
         userNip = userDoc.data().nip || '';
       }
-    } catch (e) {
-      // Continue without user info
-    }
+    } catch (e) { /* Continue */ }
 
     const attendanceData = {
       uid,
@@ -456,8 +829,8 @@ app.post('/api/attendance', async (req, res) => {
       checkIn: checkIn || new Date().toISOString(),
       checkOut: checkOut || null,
       note: note || '',
-      createdAt: admin.firestore.FieldValue.serverTimestamp(),
-      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
     };
 
     await db.collection('attendance').doc(id).set(attendanceData);
@@ -472,13 +845,13 @@ app.post('/api/attendance', async (req, res) => {
 });
 
 // PUT /api/attendance/:id
-app.put('/api/attendance/:id', async (req, res) => {
+app.put('/api/attendance/:id', authMiddleware, async (req, res) => {
   try {
     const { id } = req.params;
     const { status, checkOut, note } = req.body;
 
-    if (!isFirestoreAvailable()) {
-      return errorResponse(res, 'SERVICE_UNAVAILABLE', 'Database tidak tersedia', 503);
+    if (req.user?.role !== 'admin') {
+      return errorResponse(res, 'FORBIDDEN', 'Hanya admin yang dapat mengubah data absensi', 403);
     }
 
     const docRef = db.collection('attendance').doc(id);
@@ -488,10 +861,7 @@ app.put('/api/attendance/:id', async (req, res) => {
       return errorResponse(res, 'NOT_FOUND', 'Data absensi tidak ditemukan', 404);
     }
 
-    const updateData = {
-      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-    };
-
+    const updateData = { updatedAt: serverTimestamp() };
     if (status) updateData.status = status.toLowerCase();
     if (checkOut) updateData.checkOut = checkOut;
     if (note !== undefined) updateData.note = note;
@@ -509,12 +879,12 @@ app.put('/api/attendance/:id', async (req, res) => {
 });
 
 // DELETE /api/attendance/:id
-app.delete('/api/attendance/:id', async (req, res) => {
+app.delete('/api/attendance/:id', authMiddleware, async (req, res) => {
   try {
     const { id } = req.params;
 
-    if (!isFirestoreAvailable()) {
-      return errorResponse(res, 'SERVICE_UNAVAILABLE', 'Database tidak tersedia', 503);
+    if (req.user?.role !== 'admin') {
+      return errorResponse(res, 'FORBIDDEN', 'Hanya admin yang dapat menghapus data absensi', 403);
     }
 
     const docRef = db.collection('attendance').doc(id);
@@ -534,18 +904,18 @@ app.delete('/api/attendance/:id', async (req, res) => {
 });
 
 // ========================================
-// QR Code Routes
+// QR Code Routes (Auth Required)
 // ========================================
 
-// POST /api/qr/generate
-app.post('/api/qr/generate', async (req, res) => {
+// POST /api/qr/generate (Admin only)
+app.post('/api/qr/generate', authMiddleware, async (req, res) => {
   try {
+    if (req.user?.role !== 'admin') {
+      return errorResponse(res, 'FORBIDDEN', 'Hanya admin yang dapat membuat QR Code', 403);
+    }
+
     const { validMinutes } = req.body;
     const minutes = parseInt(validMinutes) || 30;
-
-    if (!isFirestoreAvailable()) {
-      return errorResponse(res, 'SERVICE_UNAVAILABLE', 'Database tidak tersedia', 503);
-    }
 
     const code = uuidv4().substring(0, 8).toUpperCase();
     const now = new Date();
@@ -570,15 +940,24 @@ app.post('/api/qr/generate', async (req, res) => {
       .where('active', '==', true)
       .get();
 
-    const batch = db.batch();
-    activeSessions.forEach(doc => {
-      if (doc.id !== sessionId) {
-        batch.update(doc.ref, { active: false });
+    if (useAdminSDK && admin) {
+      const batch = db.batch();
+      activeSessions.forEach(doc => {
+        if (doc.id !== sessionId) {
+          batch.update(doc.ref, { active: false });
+        }
+      });
+      await batch.commit();
+    } else {
+      // Fallback for Client SDK: update one by one
+      for (const doc of activeSessions.docs) {
+        if (doc.id !== sessionId) {
+          await db.collection('qr_sessions').doc(doc.id).update({ active: false });
+        }
       }
-    });
-    await batch.commit();
+    }
 
-    // Generate QR code image
+    // Generate QR data string
     const qrData = JSON.stringify({
       code,
       sessionId,
@@ -586,17 +965,14 @@ app.post('/api/qr/generate', async (req, res) => {
       type: 'absensi',
     });
 
+    // Generate QR code image
     let qrImage = null;
     try {
       qrImage = await QRCode.toDataURL(qrData, {
         width: 300,
         margin: 2,
-        color: {
-          dark: '#000000',
-          light: '#FFFFFF',
-        },
+        color: { dark: '#000000', light: '#FFFFFF' },
       });
-      // Remove data URL prefix to get just base64
       qrImage = qrImage.replace(/^data:image\/png;base64,/, '');
     } catch (qrErr) {
       console.error('QR generation error:', qrErr);
@@ -604,6 +980,7 @@ app.post('/api/qr/generate', async (req, res) => {
 
     return successResponse(res, {
       session: { id: sessionId, ...sessionData },
+      qrData,
       qrImage,
     });
   } catch (error) {
@@ -613,12 +990,8 @@ app.post('/api/qr/generate', async (req, res) => {
 });
 
 // GET /api/qr/active
-app.get('/api/qr/active', async (req, res) => {
+app.get('/api/qr/active', authMiddleware, async (req, res) => {
   try {
-    if (!isFirestoreAvailable()) {
-      return errorResponse(res, 'SERVICE_UNAVAILABLE', 'Database tidak tersedia', 503);
-    }
-
     const snapshot = await db.collection('qr_sessions')
       .where('active', '==', true)
       .orderBy('createdAt', 'desc')
@@ -626,19 +999,17 @@ app.get('/api/qr/active', async (req, res) => {
       .get();
 
     if (snapshot.empty) {
-      return successResponse(res, { session: null, qrImage: null });
+      return successResponse(res, { session: null, qrImage: null, qrData: null });
     }
 
     const doc = snapshot.docs[0];
     const sessionData = { id: doc.id, ...doc.data() };
 
-    // Check if expired
     if (new Date(sessionData.expiresAt) < new Date()) {
       await db.collection('qr_sessions').doc(doc.id).update({ active: false });
-      return successResponse(res, { session: null, qrImage: null });
+      return successResponse(res, { session: null, qrImage: null, qrData: null });
     }
 
-    // Regenerate QR image
     const qrData = JSON.stringify({
       code: sessionData.code,
       sessionId: sessionData.id,
@@ -660,6 +1031,7 @@ app.get('/api/qr/active', async (req, res) => {
 
     return successResponse(res, {
       session: sessionData,
+      qrData,
       qrImage,
     });
   } catch (error) {
@@ -668,20 +1040,16 @@ app.get('/api/qr/active', async (req, res) => {
   }
 });
 
-// POST /api/qr/scan
-app.post('/api/qr/scan', async (req, res) => {
+// POST /api/qr/scan (Karyawan scan QR)
+app.post('/api/qr/scan', authMiddleware, async (req, res) => {
   try {
-    const { code, uid } = req.body;
+    const { code } = req.body;
+    const uid = req.uid;
 
-    if (!code || !uid) {
-      return errorResponse(res, 'VALIDATION_ERROR', 'Code dan UID wajib diisi');
+    if (!code) {
+      return errorResponse(res, 'VALIDATION_ERROR', 'Code wajib diisi');
     }
 
-    if (!isFirestoreAvailable()) {
-      return errorResponse(res, 'SERVICE_UNAVAILABLE', 'Database tidak tersedia', 503);
-    }
-
-    // Find the QR session
     const snapshot = await db.collection('qr_sessions')
       .where('code', '==', code)
       .where('active', '==', true)
@@ -695,13 +1063,11 @@ app.post('/api/qr/scan', async (req, res) => {
     const sessionDoc = snapshot.docs[0];
     const sessionData = sessionDoc.data();
 
-    // Check if expired
     if (new Date(sessionData.expiresAt) < new Date()) {
       await db.collection('qr_sessions').doc(sessionDoc.id).update({ active: false });
       return errorResponse(res, 'QR_EXPIRED', 'QR Code sudah expired');
     }
 
-    // Check if already scanned today
     const today = formatDate(new Date());
     const existingAttendance = await db.collection('attendance')
       .where('uid', '==', uid)
@@ -713,7 +1079,6 @@ app.post('/api/qr/scan', async (req, res) => {
       return errorResponse(res, 'ALREADY_CHECKED_IN', 'Anda sudah melakukan absensi hari ini');
     }
 
-    // Fetch user info
     let userName = '';
     let userNip = '';
     try {
@@ -722,11 +1087,8 @@ app.post('/api/qr/scan', async (req, res) => {
         userName = userDoc.data().name || '';
         userNip = userDoc.data().nip || '';
       }
-    } catch (e) {
-      // Continue
-    }
+    } catch (e) { /* Continue */ }
 
-    // Create attendance record
     const attendanceId = uuidv4();
     const now = new Date();
     const attendanceData = {
@@ -739,15 +1101,14 @@ app.post('/api/qr/scan', async (req, res) => {
       checkOut: null,
       note: `Absensi via QR Code (${code})`,
       sessionId: sessionDoc.id,
-      createdAt: admin.firestore.FieldValue.serverTimestamp(),
-      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
     };
 
     await db.collection('attendance').doc(attendanceId).set(attendanceData);
 
-    // Update scanned count
     await db.collection('qr_sessions').doc(sessionDoc.id).update({
-      scannedCount: admin.firestore.FieldValue.increment(1),
+      scannedCount: increment(1),
     });
 
     return successResponse(res, {
@@ -761,26 +1122,24 @@ app.post('/api/qr/scan', async (req, res) => {
 });
 
 // ========================================
-// Reports Routes
+// Reports Routes (Auth Required)
 // ========================================
 
-// GET /api/reports/summary
-app.get('/api/reports/summary', async (req, res) => {
+// GET /api/reports/summary (Admin only)
+app.get('/api/reports/summary', authMiddleware, async (req, res) => {
   try {
+    if (req.user?.role !== 'admin') {
+      return errorResponse(res, 'FORBIDDEN', 'Hanya admin yang dapat melihat laporan', 403);
+    }
+
     const { month, year } = req.query;
     const now = new Date();
     const targetMonth = parseInt(month) || (now.getMonth() + 1);
     const targetYear = parseInt(year) || now.getFullYear();
 
-    if (!isFirestoreAvailable()) {
-      return errorResponse(res, 'SERVICE_UNAVAILABLE', 'Database tidak tersedia', 503);
-    }
-
-    // Get all attendance for the month
     const startDate = formatDate(new Date(targetYear, targetMonth - 1, 1));
     const endDate = formatDate(new Date(targetYear, targetMonth, 0));
 
-    // Get all attendance records for the period
     const attendanceSnapshot = await db.collection('attendance')
       .where('date', '>=', startDate)
       .where('date', '<=', endDate)
@@ -800,33 +1159,26 @@ app.get('/api/reports/summary', async (req, res) => {
       else if (status === 'sakit') sakit++;
       else if (status === 'alpha') alpha++;
 
-      // Daily breakdown
       const dateKey = data.date;
       if (!dailyMap[dateKey]) {
         dailyMap[dateKey] = { date: dateKey, hadir: 0, izin: 0, sakit: 0, alpha: 0, total: 0 };
       }
-      dailyMap[dateKey][status]++;
+      if (dailyMap[dateKey][status] !== undefined) dailyMap[dateKey][status]++;
       dailyMap[dateKey].total++;
 
-      // Employee breakdown
       const empKey = data.uid;
       if (!employeeMap[empKey]) {
         employeeMap[empKey] = {
           uid: data.uid,
           name: data.userName || '-',
           nip: data.userNip || '-',
-          hadir: 0,
-          izin: 0,
-          sakit: 0,
-          alpha: 0,
-          total: 0,
+          hadir: 0, izin: 0, sakit: 0, alpha: 0, total: 0,
         };
       }
-      employeeMap[empKey][status]++;
+      if (employeeMap[empKey][status] !== undefined) employeeMap[empKey][status]++;
       employeeMap[empKey].total++;
     });
 
-    // Format daily breakdown
     const dayNames = ['Min', 'Sen', 'Sel', 'Rab', 'Kam', 'Jum', 'Sab'];
     const dailyBreakdown = Object.values(dailyMap)
       .sort((a, b) => a.date.localeCompare(b.date))
@@ -838,7 +1190,6 @@ app.get('/api/reports/summary', async (req, res) => {
           d.sakit >= d.alpha ? 'sakit' : 'alpha',
       }));
 
-    // Format employee breakdown
     const employeeBreakdown = Object.values(employeeMap)
       .sort((a, b) => b.hadir - a.hadir);
 
@@ -854,7 +1205,7 @@ app.get('/api/reports/summary', async (req, res) => {
 });
 
 // GET /api/reports/employee/:uid
-app.get('/api/reports/employee/:uid', async (req, res) => {
+app.get('/api/reports/employee/:uid', authMiddleware, async (req, res) => {
   try {
     const { uid } = req.params;
     const { month, year } = req.query;
@@ -862,8 +1213,8 @@ app.get('/api/reports/employee/:uid', async (req, res) => {
     const targetMonth = parseInt(month) || (now.getMonth() + 1);
     const targetYear = parseInt(year) || now.getFullYear();
 
-    if (!isFirestoreAvailable()) {
-      return errorResponse(res, 'SERVICE_UNAVAILABLE', 'Database tidak tersedia', 503);
+    if (req.user?.role !== 'admin' && req.uid !== uid) {
+      return errorResponse(res, 'FORBIDDEN', 'Anda tidak memiliki akses', 403);
     }
 
     const startDate = formatDate(new Date(targetYear, targetMonth - 1, 1));
@@ -891,7 +1242,6 @@ app.get('/api/reports/employee/:uid', async (req, res) => {
       records.push({ id: doc.id, ...data });
     });
 
-    // Get user info
     let userInfo = {};
     try {
       const userDoc = await db.collection('users').doc(uid).get();
@@ -899,9 +1249,7 @@ app.get('/api/reports/employee/:uid', async (req, res) => {
         const { password: _, ...rest } = userDoc.data();
         userInfo = rest;
       }
-    } catch (e) {
-      // Continue
-    }
+    } catch (e) { /* Continue */ }
 
     return successResponse(res, {
       user: { uid, ...userInfo },
@@ -915,23 +1263,19 @@ app.get('/api/reports/employee/:uid', async (req, res) => {
 });
 
 // ========================================
-// Users Routes
+// Users Routes (Auth Required)
 // ========================================
 
 // GET /api/users
-app.get('/api/users', async (req, res) => {
+app.get('/api/users', authMiddleware, async (req, res) => {
   try {
+    if (req.user?.role !== 'admin') {
+      return errorResponse(res, 'FORBIDDEN', 'Hanya admin yang dapat melihat daftar user', 403);
+    }
+
     const { role } = req.query;
-
-    if (!isFirestoreAvailable()) {
-      return errorResponse(res, 'SERVICE_UNAVAILABLE', 'Database tidak tersedia', 503);
-    }
-
     let query = db.collection('users');
-
-    if (role) {
-      query = query.where('role', '==', role);
-    }
+    if (role) query = query.where('role', '==', role);
 
     const snapshot = await query.orderBy('createdAt', 'desc').get();
 
@@ -949,12 +1293,12 @@ app.get('/api/users', async (req, res) => {
 });
 
 // GET /api/users/:uid
-app.get('/api/users/:uid', async (req, res) => {
+app.get('/api/users/:uid', authMiddleware, async (req, res) => {
   try {
     const { uid } = req.params;
 
-    if (!isFirestoreAvailable()) {
-      return errorResponse(res, 'SERVICE_UNAVAILABLE', 'Database tidak tersedia', 503);
+    if (req.user?.role !== 'admin' && req.uid !== uid) {
+      return errorResponse(res, 'FORBIDDEN', 'Anda tidak memiliki akses', 403);
     }
 
     const doc = await db.collection('users').doc(uid).get();
@@ -976,11 +1320,6 @@ app.get('/api/users/:uid', async (req, res) => {
 // ========================================
 const seedAdmin = async () => {
   try {
-    if (!isFirestoreAvailable()) {
-      console.log('⚠️ Firestore not available, skipping admin seed');
-      return;
-    }
-
     const adminEmail = 'admin@absensi.com';
     const snapshot = await db.collection('users')
       .where('email', '==', adminEmail)
@@ -997,8 +1336,8 @@ const seedAdmin = async () => {
         jabatan: 'Administrator',
         divisi: 'IT',
         role: 'admin',
-        createdAt: admin.firestore.FieldValue.serverTimestamp(),
-        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
       });
       console.log('✅ Admin user seeded: admin@absensi.com / admin123');
     } else {
@@ -1010,14 +1349,24 @@ const seedAdmin = async () => {
 };
 
 // ========================================
-// Start Server
+// Start Server (async - wait for Firebase init)
 // ========================================
-app.listen(PORT, () => {
-  console.log(`🚀 AbsensiKu API running on port ${PORT}`);
-  console.log(`📡 Health check: http://localhost:${PORT}/api/health`);
+const startServer = async () => {
+  await initializeFirebase();
 
-  // Seed admin user
-  seedAdmin();
+  app.listen(PORT, () => {
+    console.log(`🚀 AbsensiKu API running on port ${PORT}`);
+    console.log(`📡 Health check: http://localhost:${PORT}/api/health`);
+    console.log(`🔐 Firebase Project: ${FIREBASE_PROJECT_ID}`);
+    console.log(`📦 SDK Mode: ${useAdminSDK ? 'Admin SDK (bypasses rules)' : 'Client SDK (rules apply)'}`);
+
+    seedAdmin();
+  });
+};
+
+startServer().catch(err => {
+  console.error('Failed to start server:', err);
+  process.exit(1);
 });
 
 module.exports = app;

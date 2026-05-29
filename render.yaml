@@ -1,0 +1,19 @@
+services:
+  - type: web
+    name: absensiku-api
+    runtime: node
+    plan: free
+    region: singapore
+    buildCommand: cd backend && npm install
+    startCommand: cd backend && node server.js
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 3000
+      - key: FIREBASE_PROJECT_ID
+        value: gen-lang-client-0173847591
+      - key: FIREBASE_DATABASE_URL
+        value: https://gen-lang-client-0173847591.firebaseio.com
+      - key: FIREBASE_CREDENTIAL
+        sync: false

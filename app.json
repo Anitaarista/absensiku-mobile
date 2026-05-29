@@ -38,7 +38,7 @@
     ],
     "googleServicesFile": "./google-services.json",
     "extra": {
-      "apiUrl": "http://localhost:3000/api",
+      "apiUrl": "https://absensiku-api.onrender.com/api",
       "eas": {
         "projectId": "be179dec-a9d2-44d6-984a-7b074d209f9c"
       }

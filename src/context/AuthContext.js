@@ -104,6 +104,11 @@ export const AuthProvider = ({ children }) => {
   };
 
   const logout = async () => {
+    try {
+      await authAPI.logout();
+    } catch (e) {
+      // Continue even if server logout fails
+    }
     setUser(null);
     setToken(null);
     await clearAuthData();

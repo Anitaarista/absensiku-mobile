@@ -36,6 +36,7 @@ Thumbs.db
 # Firebase credentials (NEVER commit service account keys)
 *firebase-adminsdk*.json
 *service-account*.json
+serviceAccountKey.json
 GoogleService-Info.plist
 
 # Build artifacts
