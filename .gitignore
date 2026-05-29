@@ -33,10 +33,9 @@ Thumbs.db
 .env.local
 .env.production
 
-# Firebase credentials (NEVER commit)
+# Firebase credentials (NEVER commit service account keys)
 *firebase-adminsdk*.json
 *service-account*.json
-google-services.json
 GoogleService-Info.plist
 
 # Build artifacts
