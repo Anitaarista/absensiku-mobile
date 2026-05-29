@@ -1,31 +1,36 @@
 {
   "project_info": {
-    "project_number": "1074665485688",
+    "project_number": "1087219440433",
     "project_id": "gen-lang-client-0173847591",
     "storage_bucket": "gen-lang-client-0173847591.firebasestorage.app"
   },
   "client": [
     {
       "client_info": {
-        "mobilesdk_app_id": "1:1074665485688:android:absensiku-mobile",
+        "mobilesdk_app_id": "1:1087219440433:android:0b092c1a6b58b828db2e10",
         "android_client_info": {
-          "package_name": "com.absensiku.mobile"
+          "package_name": "com.hyperlot99.absensiku"
         }
       },
       "oauth_client": [
         {
-          "client_id": "1074665485688-absensiku.apps.googleusercontent.com",
+          "client_id": "1087219440433-kidrt9qejankqskm63goenggaauv6lqv.apps.googleusercontent.com",
           "client_type": 3
         }
       ],
       "api_key": [
         {
-          "current_key": "AIzaSyDummyKeyReplaceWithYourActualKey"
+          "current_key": "AIzaSyC4Lfbd9Z4WPlZvO0kAU6HrZpDQ6zlPiDU"
         }
       ],
       "services": {
         "appinvite_service": {
-          "other_platform_oauth_client": []
+          "other_platform_oauth_client": [
+            {
+              "client_id": "1087219440433-kidrt9qejankqskm63goenggaauv6lqv.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
         }
       }
     }

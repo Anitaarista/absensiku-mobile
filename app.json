@@ -11,13 +11,13 @@
     },
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.absensiku.mobile"
+      "bundleIdentifier": "com.hyperlot99.absensiku"
     },
     "android": {
       "adaptiveIcon": {
         "backgroundColor": "#0D9488"
       },
-      "package": "com.absensiku.mobile",
+      "package": "com.hyperlot99.absensiku",
       "permissions": [
         "CAMERA",
         "android.permission.CAMERA"
@@ -36,6 +36,7 @@
       "expo-asset",
       "expo-font"
     ],
+    "googleServicesFile": "./google-services.json",
     "extra": {
       "apiUrl": "http://localhost:3000/api",
       "eas": {
